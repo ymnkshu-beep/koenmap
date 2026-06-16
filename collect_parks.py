@@ -589,6 +589,7 @@ SOURCES = [
         "license": "CC BY",
         "type": "ckan_api_bulk",
         "ckan_base": "https://search.ckan.jp",
+        "strict_park_filter": True,
     },
     {
         "source_id": "B04_geospatial",
@@ -809,8 +810,12 @@ def handle_ckan_api(source: dict, collected_rows: list, log_rows: list):
     except Exception as e:
         log_rows.append(make_log(source, "error", f"JSON解析失敗: {e}", 0))
         return
+    PARK_RE = re.compile(r"公園|こうえん|park", re.IGNORECASE)
     rows = []
     for pkg in results:
+        title = pkg.get("title", "") + " " + (pkg.get("notes") or "")
+        if source.get("strict_park_filter", False) and not PARK_RE.search(title + pkg.get("name", "")):
+            continue
         resources = pkg.get("resources", [])
         pkg_source = dict(source)
         pkg_source["city"] = source.get("city") or pkg.get("organization", {}).get("title", "")
@@ -876,11 +881,20 @@ def handle_bodik_ckan_bulk(source: dict, collected_rows: list, log_rows: list):
             if start >= total or not results:
                 break
     total_rows = 0
+    PARK_KEYWORDS = re.compile(r"公園|こうえん|park", re.IGNORECASE)
+    EXCLUDE_KEYWORDS = re.compile(r"農|林|漁|高校|学校|病院|福祉|保育|介護|観光|バス|道路|橋|河川|上水|下水|ごみ|廃棄|選挙|税|補助金|企業|工場|農家|農地")
     for pkg in all_results:
         pkg_id = pkg.get("name", "")
+        title = pkg.get("title", "") + " " + pkg.get("notes", "")
         org = pkg.get("organization", {}).get("title", "不明")
         license_title = pkg.get("license_title") or source["license"]
         if "非商用" in license_title or "NonCommercial" in license_title:
+            continue
+        if not PARK_KEYWORDS.search(title + pkg_id):
+            log.info(f"  skip non-park pkg: {pkg_id} {title[:40]}")
+            continue
+        if EXCLUDE_KEYWORDS.search(title):
+            log.info(f"  skip excluded pkg: {pkg_id} {title[:40]}")
             continue
         sub = dict(source)
         sub["source_id"] = f"{source['source_id']}_{pkg_id}"
