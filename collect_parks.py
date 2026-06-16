@@ -43,9 +43,6 @@ log = logging.getLogger(__name__)
 
 session = requests.Session()
 session.headers.update({"User-Agent": UA})
-session.verify = False
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 robots_cache: dict[str, RobotFileParser] = {}
 last_request: dict[str, float] = {}
@@ -70,15 +67,7 @@ def robots_allowed(url: str) -> bool:
         try:
             rp.read()
         except Exception:
-            try:
-                import ssl, urllib.request
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                with urllib.request.urlopen(f"{base}/robots.txt", context=ctx, timeout=10) as resp:
-                    rp.parse(resp.read().decode("utf-8", errors="ignore").splitlines())
-            except Exception:
-                rp = None
+            rp = None
         robots_cache[base] = rp
     rp = robots_cache[base]
     if rp is None:
