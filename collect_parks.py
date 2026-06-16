@@ -107,10 +107,26 @@ def read_csv_bytes(raw: bytes) -> Optional[pd.DataFrame]:
     enc = detect_encoding(raw)
     for e in [enc, "utf-8-sig", "utf-8", "shift_jis", "cp932", "euc-jp"]:
         try:
-            return pd.read_csv(io.BytesIO(raw), encoding=e, dtype=str, low_memory=False)
+            df = pd.read_csv(io.BytesIO(raw), encoding=e, dtype=str, low_memory=False)
+            return _find_header_row(df)
         except Exception:
             continue
     return None
+
+
+def _find_header_row(df_raw: pd.DataFrame, max_scan: int = 10) -> pd.DataFrame:
+    """全列がUnnamedの場合、ヘッダー行を先頭から走査して再読み込み"""
+    if not all(str(c).startswith("Unnamed:") for c in df_raw.columns):
+        return df_raw
+    for i in range(1, min(max_scan, len(df_raw))):
+        row = df_raw.iloc[i]
+        if row.notna().sum() >= 2 and not all(str(v).startswith("Unnamed:") for v in row):
+            new_cols = [str(v).strip() if pd.notna(v) else f"_col{j}" for j, v in enumerate(row)]
+            result = df_raw.iloc[i + 1:].copy()
+            result.columns = new_cols
+            result = result.reset_index(drop=True)
+            return result
+    return df_raw
 
 
 def read_excel_bytes(raw: bytes, filename: str = "") -> Optional[pd.DataFrame]:
@@ -122,11 +138,12 @@ def read_excel_bytes(raw: bytes, filename: str = "") -> Optional[pd.DataFrame]:
                      if re.search(r"公園|park", s, re.IGNORECASE)]
         target = preferred[0] if preferred else sheet_names[0]
         df = pd.read_excel(io.BytesIO(raw), sheet_name=target, dtype=str, engine="openpyxl")
-        return df
+        return _find_header_row(df)
     except Exception as e:
         log.warning(f"Excel read error {filename}: {e}")
     try:
-        return pd.read_excel(io.BytesIO(raw), dtype=str, engine="xlrd")
+        df = pd.read_excel(io.BytesIO(raw), dtype=str, engine="xlrd")
+        return _find_header_row(df)
     except Exception:
         return None
 
