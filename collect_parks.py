@@ -560,15 +560,7 @@ SOURCES = [
         "source_id": "B01_bodik_ckan",
         "pref": "", "city": "",
         "org": "BODIK CKAN（全国自治体）",
-        "url": "https://data.bodik.jp/api/3/action/package_search?q=%E5%85%AC%E5%9C%92+%E4%B8%80%E8%A6%A7&res_format=CSV&rows=100&start=0",
-        "license": "CC BY",
-        "type": "bodik_ckan_bulk",
-    },
-    {
-        "source_id": "B02_bodik_ckan_xlsx",
-        "pref": "", "city": "",
-        "org": "BODIK CKAN（全国自治体・XLSX）",
-        "url": "https://data.bodik.jp/api/3/action/package_search?q=%E5%85%AC%E5%9C%92+%E4%B8%80%E8%A6%A7&res_format=XLSX&rows=100&start=0",
+        "url": "https://data.bodik.jp/api/3/action/package_search?q=%E5%85%AC%E5%9C%92&rows=100&start=0",
         "license": "CC BY",
         "type": "bodik_ckan_bulk",
     },
@@ -835,36 +827,57 @@ def handle_ckan_package_api(source: dict, collected_rows: list, log_rows: list):
 
 
 def handle_bodik_ckan_bulk(source: dict, collected_rows: list, log_rows: list):
-    """BODIK CKAN 横断検索（重複除去のため source_id に pkg_id を付与）"""
-    log.info(f"[{source['source_id']}] bodik_ckan_bulk {source['url']}")
-    r = polite_get(source["url"])
-    if r is None:
-        log_rows.append(make_log(source, "error", "API取得失敗", 0))
-        return
-    try:
-        data = r.json()
-        results = data["result"]["results"]
-    except Exception as e:
-        log_rows.append(make_log(source, "error", f"JSON解析失敗: {e}", 0))
-        return
+    """BODIK CKAN 横断検索（ページネーション対応、複数クエリ）"""
+    base_api = "https://data.bodik.jp/api/3/action/package_search"
+    queries = ["公園", "都市公園 一覧", "公園一覧"]
+    seen_pkg_ids: set = set()
+    all_results = []
+    for q in queries:
+        start = 0
+        page_size = 100
+        while True:
+            params = {"q": q, "rows": page_size, "start": start}
+            url = f"{base_api}?q={requests.utils.quote(q)}&rows={page_size}&start={start}"
+            log.info(f"[{source['source_id']}] bodik_ckan_bulk q={q!r} start={start}")
+            r = polite_get(url)
+            if r is None:
+                log.warning(f"  API取得失敗 q={q!r} start={start}")
+                break
+            try:
+                data = r.json()
+                results = data["result"]["results"]
+                total = data["result"]["count"]
+            except Exception as e:
+                log.warning(f"  JSON解析失敗: {e}")
+                break
+            for pkg in results:
+                pkg_id = pkg.get("name", pkg.get("id", ""))
+                if pkg_id and pkg_id not in seen_pkg_ids:
+                    seen_pkg_ids.add(pkg_id)
+                    all_results.append(pkg)
+            start += page_size
+            if start >= total or not results:
+                break
     total_rows = 0
-    already = {s["source_id"] for s in SOURCES}
-    for pkg in results:
+    for pkg in all_results:
         pkg_id = pkg.get("name", "")
         org = pkg.get("organization", {}).get("title", "不明")
-        pref = ""
-        city = org
-        sid = f"{source['source_id']}_{pkg_id}"
+        license_title = pkg.get("license_title") or source["license"]
+        if "非商用" in license_title or "NonCommercial" in license_title:
+            continue
         sub = dict(source)
-        sub["source_id"] = sid
-        sub["pref"] = pref
-        sub["city"] = city
+        sub["source_id"] = f"{source['source_id']}_{pkg_id}"
+        sub["pref"] = ""
+        sub["city"] = org
         sub["org"] = org
-        sub["license"] = (pkg.get("license_title") or source["license"])
+        sub["license"] = license_title
         rows = process_ckan_resources(pkg.get("resources", []), sub)
         total_rows += len(rows)
         collected_rows.extend(rows)
-    log_rows.append(make_log(source, "success", f"BODIK bulk {len(results)} pkgs", total_rows))
+    if total_rows > 0:
+        log_rows.append(make_log(source, "success", f"BODIK bulk {len(all_results)} pkgs", total_rows))
+    else:
+        log_rows.append(make_log(source, "skipped", "対象リソース無し", 0))
 
 
 def handle_ckan_api_bulk(source: dict, collected_rows: list, log_rows: list):
