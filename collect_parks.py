@@ -25,7 +25,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # ─── 設定 ────────────────────────────────────────────────────────────────────
-UA = "park-data-collector/1.0"
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 REQUEST_INTERVAL = 1.2          # 秒
 REQUEST_TIMEOUT  = 30
 OUTPUT_CSV       = "parks_japan_all.csv"
